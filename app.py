@@ -6,7 +6,7 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 """
 
 import sqlite3
-
+from werkzeug.security import generate_password_hash
 from flask import Flask, g, jsonify, request
 
 DATABASE = "recipes.db"
@@ -126,6 +126,28 @@ def delete_recipe(recipe_id):
     if cur.rowcount == 0:
         return jsonify({"error": "recipe not found"}), 404
     return "", 204
+
+@app.post("/register")
+def register():
+    data = request.get_json() or {}
+    email = data.get("email")
+    password = data.get("password")
+
+    if not email or not password:
+        return {"error": "email and password are required"}, 400
+
+    db = get_db()
+    password_hash = generate_password_hash(password)
+    try:
+        db.execute(
+            "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+            (email, password_hash)
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return {"error": "account with that email already exists"}, 409
+
+    return {"email": email}, 201
 
 
 if __name__ == "__main__":
