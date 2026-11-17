@@ -8,11 +8,23 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, g, jsonify, request
+import os
+from datetime import datetime, timedelta, timezone
+import jwt
+from dotenv import load_dotenv
+from pathlib import Path
 
 DATABASE = "recipes.db"
 
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
 app = Flask(__name__)
 
+JWT_SECRET = os.environ.get("JWT_SECRET")
+print(f"Debug JWT_SECRET in app.py: {JWT_SECRET}")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is not set")
 
 def get_db():
     if "db" not in g:
@@ -170,10 +182,21 @@ def login():
     if not check_password_hash(user["password_hash"], password):
         return {"error": "Invalid credentials"}, 401
     
+    user_id = user["id"]
+
+    payload = {
+        "sub": str(user_id),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+    }
+
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
     return {
-        "id": user["id"],
-        "email": user["email"]
+        "id": user_id,
+        "email": user["email"],
+        "token": token
     }, 200
+
 
 if __name__ == "__main__":
     app.run(debug=True)
