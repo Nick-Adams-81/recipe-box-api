@@ -74,6 +74,24 @@ def get_recipe(recipe_id):
 
 @app.post("/recipes")
 def create_recipe():
+    # read auth header
+    auth_header = request.headers.get("Authorization", "")
+
+    # check bearer format
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "auth token required"}), 401
+    token = auth_header.split(" ", 1)[1]
+
+    # verfiy token
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+    
+    # get authenticated identity
+    user_id = payload.get("sub")
+    print(f"Authenticated user: {user_id}")
+
     data = request.get_json(silent=True)
     if not data or not data.get("title") or not data.get("ingredients"):
         return jsonify({"error": "title and ingredients are required"}), 400
@@ -132,6 +150,23 @@ def update_recipe(recipe_id):
 
 @app.delete("/recipes/<int:recipe_id>")
 def delete_recipe(recipe_id):
+    # read auth header
+    auth_header = request.headers.get("Authorization", "")
+
+    # check bearer format
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "auth token required"}), 401
+    token = auth_header.split(" ", 1)[1]
+
+    # verfiy token
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    # get authenticated identity
+    user_id = payload.get("sub")
+    print(f"Authenticated user: {user_id}")
     db = get_db()
     cur = db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
     db.commit()
