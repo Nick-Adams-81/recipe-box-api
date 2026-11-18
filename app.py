@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from dotenv import load_dotenv
 from pathlib import Path
+from functools import wraps
 
 DATABASE = "recipes.db"
 
@@ -39,6 +40,28 @@ def close_db(exception):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "auth token required"}), 401
+        token = auth_header.split(" ", 1)[1]
+
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token has expired. Please log in again"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 401
+        
+        g.user_id = payload.get("sub")
+        g.role = payload.get("role")
+        print(f"Authentiocated user: {g.user_id} with role: {g.role}")
+
+        return f(*args, **kwargs)
+    return decorated
 
 
 def recipe_to_dict(row):
@@ -83,8 +106,11 @@ def list_recipes():
 
 
 @app.get("/recipes/<int:recipe_id>")
+@token_required
 def get_recipe(recipe_id):
     db = get_db()
+    user_id = g.user_id
+    role = g.role
 
     row = db.execute(
         "SELECT * FROM recipes WHERE id = ?", (recipe_id,)
@@ -94,54 +120,23 @@ def get_recipe(recipe_id):
         return jsonify({"error": "recipe not found"}), 404
     if row["is_public"] == 1:
         return jsonify(recipe_to_dict(row))
-    
-    # private: require auth and ownership
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"error": "auth token required"}), 401
 
-    token = auth_header.split(" ", 1)[1]
-
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token has expired. Please log in again"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid token"}), 401
-
-    user_id = payload.get("sub")
-
-    if row["owner_id"] != user_id:
+    if row["owner_id"] != user_id and role != "admin":
         return jsonify({"error": "forbidden: you do not own this recipe"}), 403
     return jsonify(recipe_to_dict(row))
 
 
 @app.post("/recipes")
+@token_required
 def create_recipe():
-    # read auth header
-    auth_header = request.headers.get("Authorization", "")
-
-    # check bearer format
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"error": "auth token required"}), 401
-    token = auth_header.split(" ", 1)[1]
-
-    # verfiy token
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token has expired. Please log in again"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid token"}), 401
-    
-    # get authenticated identity
-    user_id = payload.get("sub")
-    print(f"Authenticated user: {user_id}")
 
     data = request.get_json(silent=True)
     if not data or not data.get("title") or not data.get("ingredients"):
         return jsonify({"error": "title and ingredients are required"}), 400
     db = get_db()
+
+    user_id = g.user_id
+
     try:
         cur = db.execute(
             "INSERT INTO recipes (title, ingredients, instructions, is_public, owner_id)"
@@ -164,29 +159,12 @@ def create_recipe():
 
 
 @app.patch("/recipes/<int:recipe_id>")
+@token_required
 def update_recipe(recipe_id):
-    # read auth header
-    auth_header = request.headers.get("Authorization", "")
-
-    # check bearer format
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"error": "auth token required"}), 401
-    token = auth_header.split(" ", 1)[1]
-
-    # verfiy token
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token has expired. Please log in again"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid token"}), 401
-    
-    # get authenticated identity
-    user_id = payload.get("sub")
-    role = payload.get("role")
-    print(f"Authenticated user: {user_id} with role: {role}")
-
     db = get_db()
+
+    user_id = g.user_id
+    role = g.role
 
     recipe = db.execute(
         "SELECT * FROM recipes where id = ?",
@@ -229,29 +207,12 @@ def update_recipe(recipe_id):
 
 
 @app.delete("/recipes/<int:recipe_id>")
+@token_required
 def delete_recipe(recipe_id):
-    # read auth header
-    auth_header = request.headers.get("Authorization", "")
-
-    # check bearer format
-    if not auth_header.startswith("Bearer "):
-        return jsonify({"error": "auth token required"}), 401
-    token = auth_header.split(" ", 1)[1]
-
-    # verfiy token
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token has expired. Please log in again"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid token"}), 401
-
-    # get authenticated identity
-    user_id = payload.get("sub")
-    role = payload.get("role")
-    print(f"Authenticated user: {user_id} with role: {role}")
 
     db = get_db()
+    user_id = g.user_id
+    role = g.role
 
     recipe = db.execute(
         "SELECt * FROM recipes WHERE id = ?",
@@ -293,6 +254,7 @@ def register():
 
 @app.post("/login")
 def login():
+    print("HIT /login")
     data = request.get_json()
     email = data.get("email")
     password = data.get("password")
