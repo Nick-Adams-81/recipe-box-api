@@ -183,7 +183,8 @@ def update_recipe(recipe_id):
     
     # get authenticated identity
     user_id = payload.get("sub")
-    print(f"Authenticated user: {user_id}")
+    role = payload.get("role")
+    print(f"Authenticated user: {user_id} with role: {role}")
 
     db = get_db()
 
@@ -194,7 +195,7 @@ def update_recipe(recipe_id):
 
     if recipe is None:
         return jsonify({"Error": "recipe not found"}), 404
-    if recipe["owner_id"] != user_id:
+    if recipe["owner_id"] != user_id and role != "admin":
         return jsonify({"error": "forbidden: you do not own this recipe"}), 403
 
     data = request.get_json(silent=True)
@@ -247,7 +248,8 @@ def delete_recipe(recipe_id):
 
     # get authenticated identity
     user_id = payload.get("sub")
-    print(f"Authenticated user: {user_id}")
+    role = payload.get("role")
+    print(f"Authenticated user: {user_id} with role: {role}")
 
     db = get_db()
 
@@ -258,9 +260,9 @@ def delete_recipe(recipe_id):
 
     if recipe is None:
         return jsonify({"error": "recipe not found"}), 404
-    if recipe["owner_id"] != user_id:
+    if recipe["owner_id"] != user_id and role != "admin":
         return jsonify({"error": "forbidden: you do not own this recipe"}), 403
-    
+
     cur = db.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
     db.commit()
     if cur.rowcount == 0:
@@ -301,7 +303,7 @@ def login():
     db = get_db()
 
     user = db.execute(
-        "SELECT id, email, password_hash FROM users WHERE email = ?",
+        "SELECT id, email, password_hash, role FROM users WHERE email = ?",
         (email,)
     ).fetchone()
 
@@ -314,8 +316,10 @@ def login():
 
     payload = {
         "sub": str(user_id),
+        "role": user["role"],
         "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
+    print(f"LOGIN PAYLOAD: {payload}")
 
     token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
